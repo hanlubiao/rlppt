@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>[彪哥带你学强化学习]SARSA算法案例 悬崖漫步</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 1200px;
+            margin: 10px;
+        }
+        .grid-container {
+            display: grid;
+            gap: 1px;
+            margin: 20px 0;
+            background-color: #333;
+            padding: 2px;
+            border: 2px solid #333;
+        }
+        .cell {
+            background-color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+        }
+        .cliff {
+            background-color: #ff6666;
+        }
+        .start {
+            background-color: #5197f3;
+        }
+        .end {
+            background-color: green;
+        }
+        .agent {
+            background-color: yellow;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        .parameter-row {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .parameter-row, .button-row {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 3px 20px;
+            margin: 0 5px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .settings {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .settings div {
+            margin: 0 15px;
+            display: flex;
+            align-items: center;
+        }
+        input[type="number"] {
+            width: 100px;
+            margin-left: 10px;
+        }
+        .info, .showCul {
+            display: flex;
+            justify-content: center;
+        }
+        .info p{
+            margin-right: 15px;
+        }
+        table {
+            border-collapse: collapse;
+            margin: 20px;
+            font-size: 14px;
+            width: 100%;
+        }
+        td, th {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>SARSA算法案例 悬崖漫步</h1>
+    <div class="container">
+        <div class="parameter-row">
+            <div>
+                <label for="rows">行数:</label>
+                <input type="number" id="rows" min="1" value="4">
+            </div>
+            <div>
+                <label for="cols">列数:</label>
+                <input type="number" id="cols" min="1" value="5">
+            </div>
+            <div>
+                <label for="trainN">批量训练步数:</label>
+                <input type="number" id="trainN" min="1" step="1" value="100">
+            </div>
+            <!-- <div>
+                <label for="allowBoundary">允许选界外:</label>
+                <input type="checkbox" id="allowBoundary" checked>
+            </div> -->
+        </div>
+        <div class="parameter-row">
+            
+            <div>
+                <label for="alpha">学习率 (α):</label>
+                <input type="number" id="alpha" min="0" max="1" step="0.01" value="0.1">
+            </div>
+            <div>
+                <label for="gamma">折扣因子 (γ):</label>
+                <input type="number" id="gamma" min="0" max="1" step="0.01" value="0.9">
+            </div>
+            <div>
+                <label for="epsilon">探索率 (ε):</label>
+                <input type="number" id="epsilon" min="0" max="1" step="0.01" value="0.1">
+            </div>
+        </div>
+        <div class="button-row">
+            <button id="stepButton">走 1 步</button>
+            <button id="trainButton">训练 1 步</button>
+            <button id="trainBatchButton">训练 n 步</button>
+            <button id="trainEpoch">训练 1 回合</button>
+            <button id="train2End">训练 1 次到终点</button>
+            <button id="resetButton">重置</button>
+        </div>
+        <div class="info">
+            <p>当前步数: <span id="steps">0</span></p>
+
+            <p>选择动作方式: <span id="chooseActionModel"></span></p>
+            <p>SARSA: <span id="sarsa"></span></p>
+        </div>
+        <div class="showCul">
+            <p>计算公式: <span id="showCul"></span></p>
+        </div>
+        
+    </div>
+    <div class="info">
+        <div>
+            <h3 style="text-align: center">悬崖漫步</h3>
+            <div class="grid-container" id="grid"></div>
+        </div>
+        <div>
+            <h3 style="text-align: center">Q 表</h3>
+            <div id="qTable"></div>
+        </div>
+    </div>
+
+    <script>
+        // 动作定义
+        const ACTIONS = {
+            UP: '上',
+            DOWN: '下',
+            LEFT: '左',
+            RIGHT: '右'
+        };
+        const ACTION_LIST = [ACTIONS.UP, ACTIONS.LEFT, ACTIONS.RIGHT, ACTIONS.DOWN];
+        
+        // 参数设置
+        let ROWS = 4;
+        let COLS = 5;
+        let alpha = 0.1; // 学习率
+        let gamma = 0.9; // 折扣因子
+        let epsilon = 0.1; // 探索率
+        let allowBoundary = true; // 是否允许界外
+        let trainN = 100 // 批量训练按钮，训练步数
+
+        let actionSorts = '随机'
+        let allSortedActions = []
+            
+        Object.defineProperty(this, "actionsort", {
+            set(value) {
+                allSortedActions = []
+                if (value && value.length==4) {
+                    actionSorts = value
+                    for (s of actionSorts) {
+                        if (s == '上') {
+                            allSortedActions.push(ACTIONS.UP)
+                        } else if (s == '下') {
+                            allSortedActions.push(ACTIONS.DOWN)
+                        } else if (s == '左') {
+                            allSortedActions.push(ACTIONS.LEFT)
+                        } else if (s == '右') {
+                            allSortedActions.push(ACTIONS.RIGHT)
+                        }
+                    }
+                    if (allSortedActions.length != 4) {
+                        allSortedActions = []
+                    } else {
+                        console.log('当多个动作价值相同时，使用顺序：' + actionSorts)
+                    }
+                } 
+                
+                if (allSortedActions.length != 4) {
+                    console.log('当多个动作价值相同时，使用随机顺序')
+                    actionSorts = '随机'
+                    allSortedActions.push(ACTIONS.UP, ACTIONS.DOWN, ACTIONS.LEFT, ACTIONS.RIGHT)
+                }
+            },
+        });
+        actionsort = '随机'
+  
+        
+        // 当前状态
+        let lastState = [ROWS - 1, 0]; // 起点
+        let currentState = [ROWS - 1, 0]; // 起点
+        let sarsa = ''
+        let lastAction = '无';
+        let currentAction = '无';
+        let chooseActionModel = ''
+        let showCul = ''
+        let totalSteps = 0;
+        let agentElement = null;
+        
+        // 网格世界初始化
+        let GRID = [];
+        
+        // Q 表初始化
+        let Q_TABLE = {};
+        
+        // 初始化网格世界
+        function initGridWorld() {
+            showCul = ''
+            sarsa=''
+            ROWS = parseInt(document.getElementById('rows').value);
+            COLS = parseInt(document.getElementById('cols').value);
+            
+            // 重置网格
+            GRID = Array(ROWS).fill().map(() => Array(COLS).fill('normal'));
+            
+            // 设置悬崖和终点（仅在最后一行）
+            if (ROWS > 0 && COLS > 1) {
+                for (let i = 1; i < COLS - 1; i++) {
+                    GRID[ROWS - 1][i] = 'cliff';
+                }
+                GRID[ROWS - 1][COLS - 1] = 'end';
+                GRID[ROWS - 1][0] = 'start';
+            }
+            
+            // 重置Q表
+            Q_TABLE = {};
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    const stateKey = `[${row},${col}]`;
+                    Q_TABLE[stateKey] = {
+                        [ACTIONS.UP]: 0,
+                        [ACTIONS.DOWN]: 0,
+                        [ACTIONS.LEFT]: 0,
+                        [ACTIONS.RIGHT]: 0
+                    };
+                }
+            }
+            
+            // 重置智能体位置
+            if (ROWS > 0 && COLS > 0) {
+                lastState = currentState = [ROWS - 1, 0];
+            } else {
+                lastState = currentState = [0, 0];
+            }
+            
+            totalSteps = 0;
+            
+            // 更新UI
+            initGrid();
+            updateUI();
+            updateQTableDisplay();
+        }
+        
+        // 初始化网格显示
+        function initGrid() {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            grid.style.gridTemplateColumns = `repeat(${COLS}, 40px)`;
+            grid.style.gridTemplateRows = `repeat(${ROWS}, 40px)`;
+            grid.style.width = `${COLS*41+2}px`
+            
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+                    
+                    if (GRID[row][col] === 'cliff') {
+                        cell.classList.add('cliff');
+                        cell.textContent = 'X';
+                    } else if (GRID[row][col] === 'start') {
+                        cell.classList.add('start');
+                        cell.textContent = 'S';
+                    } else if (GRID[row][col] === 'end') {
+                        cell.classList.add('end');
+                        cell.textContent = '√';
+                    } else {
+                        cell.textContent = '';
+                    }
+
+                    
+                    grid.appendChild(cell);
+                }
+            }
+            
+            // 放置智能体
+            placeAgent();
+        }
+        
+        // 放置智能体
+        function placeAgent() {
+            if (agentElement) {
+                agentElement.classList.remove('agent');
+            }
+            
+            if (ROWS > 0 && COLS > 0) {
+                const [row, col] = currentState;
+                const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+                if (cell) {
+                    agentElement = cell;
+                    agentElement.classList.add('agent');
+                }
+            }
+        }
+        
+        
+        // 训练一步
+        function trainStep() {
+            return step(true)
+        }
+
+        // 训练n步
+        function trainStepN(n) {
+            for (let i = 0; i < n; i++) {
+                trainStep();
+            }
+        }
+
+        // 训练n步
+        function trainEpoch() {
+            while (!trainStep().isDone) {}
+        }
+
+        function train2End() {
+            while (!trainStep().isEnd) {}
+        }
+        
+        // 更新UI
+        function updateUI() {
+            placeAgent();
+            document.getElementById('steps').textContent = totalSteps;
+            // document.getElementById('currentState').textContent = `[${currentState[0]+1},${currentState[1]+1}]`;
+            // document.getElementById('lastState').textContent = `[${lastState[0]+1},${lastState[1]+1}]`;
+            // document.getElementById('lastAction').textContent = lastAction;
+            document.getElementById('chooseActionModel').textContent = chooseActionModel;
+
+            document.getElementById('sarsa').textContent = sarsa;
+            document.getElementById('showCul').textContent = showCul;
+        }
+        
+        // 更新Q表显示
+        function updateQTableDisplay() {
+            const qTableDiv = document.getElementById('qTable');
+            qTableDiv.innerHTML = '';
+            
+            // 创建表格
+            const table = document.createElement('table');
+            
+            // 创建表头
+            const headerRow = document.createElement('tr');
+            const emptyHeader = document.createElement('th');
+            emptyHeader.textContent = '';
+            headerRow.appendChild(emptyHeader);
+            
+            // 添加状态作为列头
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    const th = document.createElement('th');
+                    th.textContent = `[${row+1},${col+1}]`;
+                    headerRow.appendChild(th);
+                }
+            }
+            
+            table.appendChild(headerRow);
+            
+            const currentStateKey = `[${currentState[0]},${currentState[1]}]`;
+            const lastStateKey = `[${lastState[0]},${lastState[1]}]`;
+            // 添加每一行动作的行
+            for (const action of ACTION_LIST) {
+                const row = document.createElement('tr');
+                const th = document.createElement('th');
+                th.textContent = action;
+                row.appendChild(th);
+                
+                for (let rowState = 0; rowState < ROWS; rowState++) {
+                    for (let colState = 0; colState < COLS; colState++) {
+                        const stateKey = `[${rowState},${colState}]`;
+                        const td = document.createElement('td');
+                        td.textContent = Q_TABLE[stateKey][action].toFixed(2);
+                        if (action == lastAction && stateKey == lastStateKey) {
+                            td.style.color = 'red'
+                        }
+                        if (stateKey == currentStateKey) {
+                            td.style['background-color'] = 'yellow'
+                        }
+                        row.appendChild(td);
+                    }
+                }
+                
+                table.appendChild(row);
+            }
+            
+            qTableDiv.appendChild(table);
+        }
+        
+        // 重置训练
+        function reset() {
+            initGridWorld();
+        }
+        
+        // 初始化
+        initGridWorld();
+
+        // 按钮事件
+        // document.getElementById('allowBoundary').addEventListener('change', (e)=>{
+        //     allowBoundary = e.target.checked
+        // });
+        document.getElementById('stepButton').addEventListener('click', () => {
+            step();
+        });
+        // 按钮事件
+        document.getElementById('trainButton').addEventListener('click', () => {
+            trainStep();
+        });
+        document.getElementById('trainBatchButton').addEventListener('click', () => {
+            trainStepN(trainN)
+        });
+        document.getElementById('trainEpoch').addEventListener('click', () => {
+            trainEpoch()
+        });
+        document.getElementById('train2End').addEventListener('click', () => {
+            train2End()
+        });
+        document.getElementById('resetButton').addEventListener('click', reset);
+        
+        // 监听行数和列数的变化
+        document.getElementById('rows').addEventListener('change', reset);
+        document.getElementById('cols').addEventListener('change', reset);
+        document.getElementById('trainN').addEventListener('change', (e)=>{
+            trainN = e.target.value
+        });
+        document.getElementById('alpha').addEventListener('change', (e)=>{
+            alpha = e.target.value
+        });
+        document.getElementById('gamma').addEventListener('change', (e)=>{
+            gamma = e.target.value
+        });
+        document.getElementById('epsilon').addEventListener('change', (e)=>{
+            epsilon = e.target.value
+        });
+
+        // 获取可用动作并排序
+        function getAvailableActions(state) {
+            const [row, col] = state;
+            const actions = [];
+
+            if (allowBoundary) {
+                actions.push(...allSortedActions)
+            } else {
+                for (a of allSortedActions) {
+                    if (a == ACTIONS.UP && row > 0) {
+                        actions.push(ACTIONS.UP)
+                    } else if (a == ACTIONS.DOWN && row < ROWS - 1) {
+                        actions.push(ACTIONS.DOWN)
+                    } else if (a == ACTIONS.LEFT && col > 0) {
+                        actions.push(ACTIONS.LEFT)
+                    } else if (a == ACTIONS.RIGHT && col < COLS - 1) {
+                        actions.push(ACTIONS.RIGHT)
+                    }
+                }
+            }
+            
+            return actions;
+        }
+
+        function chooseAction(state) {
+            let availableActions = getAvailableActions(state)
+            if (Math.random() < epsilon) {
+                chooseActionModel = '随机'
+                // 探索：随机选择一个动作
+                return availableActions[Math.floor(Math.random() * availableActions.length)];
+            } else {
+                chooseActionModel = '最大'
+                // 开发：选择Q值最高的动作
+                const stateKey = `[${state[0]},${state[1]}]`;
+                const qValues = Q_TABLE[stateKey];
+                let maxQ = -Infinity;
+                let bestActions = [];
+
+                for(let action of availableActions) {
+                    if (qValues[action] > maxQ) {
+                        maxQ = qValues[action];
+                        bestActions = [action];
+                    } else if (qValues[action] === maxQ) {
+                        bestActions.push(action);
+                    }
+                }
+                
+                return actionSorts==='随机' ? bestActions[Math.floor(Math.random() * bestActions.length)] : bestActions[0];
+            }
+        }
+        
+        
+        // 执行动作，获取下一个状态和奖励
+        function takeAction(state, action) {
+            let [row, col] = state;
+            let reward = 0;
+            let nextState = [...state];
+            
+            switch (action) {
+                case ACTIONS.UP:
+                    row = Math.max(0, row - 1);
+                    break;
+                case ACTIONS.DOWN:
+                    row = Math.min(ROWS - 1, row + 1);
+                    break;
+                case ACTIONS.LEFT:
+                    col = Math.max(0, col - 1);
+                    break;
+                case ACTIONS.RIGHT:
+                    col = Math.min(COLS - 1, col + 1);
+                    break;
+            }
+            
+            nextState = [row, col];
+            isDone = false
+            isEnd = false
+            
+            // 计算奖励
+            if (GRID[row][col] === 'cliff') {
+                reward = -100; // 掉入悬崖
+                nextState = [ROWS - 1, 0]; // 重置到起点
+                isDone = true
+            } else if (GRID[row][col] === 'end') {
+                reward = 100; // 到达终点
+                nextState = [ROWS - 1, 0]; // 重置到起点
+                isDone = true
+                isEnd = true
+            } else {
+                reward = -1; // 每步的惩罚
+            }
+            
+            return { nextState, reward, isDone, isEnd };
+        }
+        
+        // 更新Q表
+        function updateQTable(state, action, reward, nextState, nextAction, isDone) {
+            const stateKey = `[${state[0]},${state[1]}]`;
+            const nextStateKey = `[${nextState[0]},${nextState[1]}]`;
+            
+            // 获取当前Q值
+            let currentQ = Q_TABLE[stateKey][action];
+            
+            // 获取下一个状态和动作的Q值
+            const nextQValue = isDone ? 0 : Q_TABLE[nextStateKey][nextAction];
+            
+            // 更新Q值
+            Q_TABLE[stateKey][action] = currentQ + alpha * (reward + gamma * nextQValue - currentQ);
+
+            const stateKeyShow = `[${state[0]+1},${state[1]+1}]`;
+            showCul = `Q(${stateKeyShow}, ${action}) = ${currentQ.toFixed(2)} + ${alpha} * (${reward} + ${gamma} * (${nextQValue.toFixed(2)}) - (${currentQ.toFixed(2)})) = ${Q_TABLE[stateKey][action].toFixed(2)}`
+        }
+        
+        // 训练一步
+        function step(isTrain=false) {
+            showCul = ''
+            sarsa=''
+            // 如果是第一步，先选择一个动作
+            if (currentAction === '无') {
+                currentAction = chooseAction(currentState);
+            }
+            
+            // 执行动作，获取下一个状态和奖励
+            const { nextState, reward, isDone, isEnd } = takeAction(currentState, currentAction);
+            
+            // 选择下一个动作
+            const nextAction = chooseAction(nextState);
+            
+            // 更新Q表 (SARSA算法)
+            isTrain && updateQTable(currentState, currentAction, reward, nextState, nextAction, isDone);
+
+            sarsa = `([${currentState[0]+1},${currentState[1]+1}], ${currentAction}, ${reward}, [${nextState[0]+1},${nextState[1]+1}], ${nextAction} )`
+            
+            // 更新当前状态和动作
+            lastState = currentState
+            currentState = nextState;
+            lastAction = currentAction;
+            currentAction = nextAction;
+            totalSteps++;
+            
+            updateQTableDisplay();
+            updateUI();
+            return { isDone, isEnd }
+        }
+        
+    </script>
+</body>
+</html>

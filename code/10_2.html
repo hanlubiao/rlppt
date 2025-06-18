@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>[彪哥带你学强化学习]REINFORCE算法可视化 悬崖漫步</title>
+    <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script> -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.22.0/tf.es2017.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 1200px;
+            margin: 10px;
+        }
+        .grid-container {
+            display: grid;
+            gap: 1px;
+            margin: 20px 0;
+            background-color: #333;
+            padding: 2px;
+            border: 2px solid #333;
+        }
+        .cell {
+            background-color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+        }
+        .cliff {
+            background-color: #ff6666;
+        }
+        .start {
+            background-color: #5197f3;
+        }
+        .end {
+            background-color: green;
+        }
+        .agent {
+            background-color: yellow;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        .parameter-row {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        .parameter-row, .button-row {
+            display: flex;
+            justify-content: center;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 3px 20px;
+            margin: 0 5px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .settings {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .settings div {
+            margin: 0 15px;
+            display: flex;
+            align-items: center;
+        }
+        input[type="number"] {
+            width: 100px;
+            margin-left: 10px;
+        }
+        .info {
+            display: flex;
+            justify-content: center;
+        }
+        .right-info {
+            width: 500px;
+            margin-left: 10px;
+        }
+        .right-info p {
+            margin: 0
+        }
+        #formula {
+            height: 90px;
+            white-space: pre-line
+        }
+        .trajectoryShow div {
+            height: 200px;
+            overflow: auto;
+        }
+        .info p{
+            margin-right: 15px;
+        }
+        table {
+            border-collapse: collapse;
+            margin: 20px;
+            font-size: 14px;
+            width: 100%;
+        }
+        td, th {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h1>REINFORCE算法可视化 悬崖漫步</h1>
+    <div class="container">
+        <div class="parameter-row">
+            <div>
+                <label for="rows">行数:</label>
+                <input type="number" id="rows" min="1" value="4">
+            </div>
+            <div>
+                <label for="cols">列数:</label>
+                <input type="number" id="cols" min="1" value="5">
+            </div>
+            <div>
+                <label for="trainN">批量训练步数:</label>
+                <input type="number" id="trainN" min="1" step="1" value="100">
+            </div>
+            <div>
+                <label for="allowCircle">允许循环:</label>
+                <input type="checkbox" id="allowCircle" checked>
+            </div>
+        </div>
+        <div class="parameter-row">
+            
+            <div>
+                <label for="alpha">学习率 (α):</label>
+                <input type="number" id="alpha" min="0" max="1" step="0.01" value="0.1">
+            </div>
+            <div>
+                <label for="gamma">折扣因子 (γ):</label>
+                <input type="number" id="gamma" min="0" max="1" step="0.01" value="0.9">
+            </div>
+            <div>
+                <label for="epsilon">探索率 (ε):</label>
+                <input type="number" id="epsilon" min="0" max="1" step="0.01" value="0.1">
+            </div>
+        </div>
+        <div class="button-row">
+            <button id="simpleStep">采样一步</button>
+            <button id="simpleEpoch">采样一个轨迹</button>
+            <button id="updateEpoch">训练一个轨迹</button>
+            <button id="trainStepN">训练N轮</button>
+            <button id="resetButton">重置</button>
+        </div>
+        <div class="info">
+            <p>当前步数: <span id="steps">0</span></p>
+            <p>当前位置: <span id="state"></span></p>
+            <p>当前奖励: <span id="G">0</span></p>
+            <!-- <p>待更新数据: <span id="topTransition">0</span></p> -->
+
+            <!-- <p>选择动作方式: <span id="chooseActionModel"></span></p> -->
+        </div>
+        
+    </div>
+    <div class="info">
+        <div class="grid-container" id="grid"></div>
+
+        <div class="right-info">
+            <!-- <div class="formula">
+                <p>公式: </p>
+                <div id="formula"></div>
+            </div> -->
+            <div class="trajectoryShow">
+                <p>轨迹: </p>
+                <div id="trajectoryShow"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 定义动作
+        const ACTIONS = {
+            UP: '上',
+            DOWN: '下',
+            LEFT: '左',
+            RIGHT: '右'
+        };
+        const ACTION_LIST = [ACTIONS.UP, ACTIONS.LEFT, ACTIONS.RIGHT, ACTIONS.DOWN];
+
+        function getActionIndex(action) {
+            for(let i=0; i< ACTION_LIST.length; i++) {
+                if (ACTION_LIST[i]== action) return i
+            }
+        }
+        
+        // 参数设置
+        let rowNum = 4;
+        let colNum = 5;
+        let alpha = 0.01; // 学习率
+        let gamma = 0.9; // 折扣因子
+        let epsilon = 0.1; // 探索率
+        let allowCircle = true; // 是否允许循环
+        let trainN = 100 // 批量训练按钮的训练步数
+
+        // 状态
+        let lastState = [rowNum - 1, 0]; // 起点
+        let currentState = [rowNum - 1, 0]; // 起点
+        let lastAction = '无';
+        
+        // 网格世界图形
+        let gridTable = [];
+        let agentElement = null;
+        
+        // 页面显示
+        let chooseActionModel = ''
+        let totalSteps = 0;
+        let G = 0
+
+        // 一个回合采样结束
+        let isSimpleDone = false
+        // 记录轨迹，用于剪切重复轨迹
+        let transitionMap = {}
+
+        let trajectory = []
+        let trajectoryShow = ''
+        let formula = ''
+
+
+        // 权重表
+        let policyNetwork = tf.sequential({
+            layers: [
+                tf.layers.dense({ inputShape: [2], units: 16, activation: 'relu' }),
+                tf.layers.dense({ units: ACTION_LIST.length, activation: 'softmax' })
+            ]
+        });
+        let optimizer = tf.train.adam(alpha);
+        
+
+        let pTable = {};
+        function initP() {
+            
+        }
+        function getP(state) {
+            actionProbs = policyNetwork.predict(tf.tensor2d([state])).dataSync();
+
+            pMap = {}
+            for(let i=0; i<ACTION_LIST.length;i++) {
+                pMap[ACTION_LIST[i]] = actionProbs[i]
+            }
+            return pMap
+        }
+        function updateP() {
+            let states = []
+            let actionIdxs = []
+            let gs = []
+            G = 0
+            if(trajectory.length > 0) {
+                for(let i=trajectory.length-1; i>=0; i--) {
+                    let {state, actionIdx, reward} = trajectory[i]
+                    G = gamma * G + reward;
+
+                    states.push(state)
+                    actionIdxs.push(actionIdx)
+                    gs.push(G)
+                }
+            }
+            trajectory = []
+
+            return tf.tidy(() => {
+                let stateTensor = tf.tensor2d(states);
+                let actionTensor = tf.tensor1d(actionIdxs, 'int32');
+                let gsTensor = tf.tensor1d(gs);
+                let lossFunction = () => {
+                    let probs = policyNetwork.apply(stateTensor);
+                    let log_probs = tf.log(probs)
+                    let selected_log_probs = tf.gather(log_probs, actionTensor, batch_dims=1)
+                    let loss = tf.mean(selected_log_probs.mul(gsTensor).neg())
+                    return loss;
+                };
+                optimizer.minimize(lossFunction);
+            });
+        }
+
+
+        function getStateKey(s, show=false) {
+            return show ? `[${s[0]+1},${s[1]+1}]` : `[${s[0]},${s[1]}]`;
+        }
+        
+        // 初始化网格世界
+        function initGridWorld() {
+            trajectoryShow = ''
+            formula = ''
+            rowNum = parseInt(document.getElementById('rows').value);
+            colNum = parseInt(document.getElementById('cols').value);
+            
+            // 重置网格
+            gridTable = Array(rowNum).fill().map(() => Array(colNum).fill('normal'));
+            
+            // 设置悬崖和终点（仅在最后一行）
+            if (rowNum > 0 && colNum > 1) {
+                for (let i = 1; i < colNum - 1; i++) {
+                    gridTable[rowNum - 1][i] = 'cliff';
+                }
+                gridTable[rowNum - 1][colNum - 1] = 'end';
+                gridTable[rowNum - 1][0] = 'start';
+            }
+            
+            initP()
+            
+            // 重置智能体位置
+            if (rowNum > 0 && colNum > 0) {
+                lastState = currentState = [rowNum - 1, 0];
+            } else {
+                lastState = currentState = [0, 0];
+            }
+            
+            totalSteps = 0;
+            
+            // 更新UI
+            initGrid();
+            updateUI();
+        }
+        
+        // 初始化网格显示
+        function initGrid() {
+            const grid = document.getElementById('grid');
+            grid.innerHTML = '';
+            grid.style.gridTemplateColumns = `repeat(${colNum}, 100px)`;
+            grid.style.gridTemplateRows = `repeat(${rowNum}, 100px)`;
+            grid.style.width = `${colNum*101+2}px`
+            document.getElementById('trajectoryShow').style.height = `${rowNum*100}px`
+            
+            for (let row = 0; row < rowNum; row++) {
+                for (let col = 0; col < colNum; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+                    
+                    if (gridTable[row][col] === 'cliff') {
+                        cell.classList.add('cliff');
+                        cell.textContent = '';
+                    } else if (gridTable[row][col] === 'start') {
+                        cell.classList.add('start');
+                        cell.textContent = '';
+                    } else if (gridTable[row][col] === 'end') {
+                        cell.classList.add('end');
+                        cell.textContent = '';
+                    } else {
+                        cell.textContent = '';
+                    }
+                    
+                    // 添加权重显示
+                    const weightsDiv = document.createElement('div');
+                    weightsDiv.className = 'weights';
+                    const weights = getP([row, col]);
+
+                    if (gridTable[row][col] === 'normal') {
+                        weightsDiv.innerHTML = `
+                        ${ACTIONS.UP}: ${weights[ACTIONS.UP].toFixed(2)}<br>
+                        ${ACTIONS.LEFT}: ${weights[ACTIONS.LEFT].toFixed(2)}<br>
+                        ${ACTIONS.RIGHT}: ${weights[ACTIONS.RIGHT].toFixed(2)}<br>
+                        ${ACTIONS.DOWN}: ${weights[ACTIONS.DOWN].toFixed(2)}
+                    `;
+                    }
+                    
+                    cell.appendChild(weightsDiv);
+                    grid.appendChild(cell);
+                }
+            }
+            
+            // 放置智能体
+            placeAgent();
+        }
+        
+        // 放置智能体
+        function placeAgent() {
+            if (agentElement) {
+                agentElement.classList.remove('agent');
+            }
+            
+            if (rowNum > 0 && colNum > 0) {
+                const [row, col] = currentState;
+                const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+                if (cell) {
+                    agentElement = cell;
+                    agentElement.classList.add('agent');
+                }
+            }
+        }
+        
+        
+        // 更新UI
+        function updateUI() {
+            placeAgent();
+            totalSteps = trajectory.length
+            document.getElementById('steps').textContent = totalSteps;
+            // document.getElementById('currentState').textContent = `[${currentState[0]+1},${currentState[1]+1}]`;
+            // document.getElementById('lastState').textContent = `[${lastState[0]+1},${lastState[1]+1}]`;
+            // document.getElementById('chooseActionModel').textContent = chooseActionModel;
+
+            // let topTransition = '';
+            // if (trajectory.length > 0) {
+            //     let {state, actionIdx, reward} = trajectory.at(-1)
+            //     topTransition = `(${getStateKey(state, true)}, ${ACTION_LIST[actionIdx]}, ${reward})`
+            // }
+            // document.getElementById('topTransition').textContent = topTransition;
+
+            document.getElementById('state').textContent = getStateKey(currentState, true);
+            document.getElementById('G').textContent = G;
+            updateTrajectoryShow ()
+            updateFormula()
+
+            // 更新权重显示
+            const updateStateKey = getStateKey(currentState);
+            for (let row = 0; row < rowNum; row++) {
+                for (let col = 0; col < colNum; col++) {
+                    const cell = document.querySelector(`.cell[data-row="${row}"][data-col="${col}"]`);
+                    if (cell) {
+                        const weightsDiv = cell.querySelector('.weights');
+                        if (weightsDiv) {
+                            const stateKey = getStateKey([row, col]);
+                            const weights = getP([row, col]);
+
+                            if (gridTable[row][col] === 'normal' || gridTable[row][col] === 'start') {
+                                if (stateKey == updateStateKey) {
+                                    let cellHtml = ''
+                                    for (action of ACTION_LIST) {
+                                        cellHtml += action == lastAction ? `<span style='color:red'>${action}: ${weights[action].toFixed(2)}</span><br>`
+                                        :`${action}: ${weights[action].toFixed(2)}<br>`
+                                    }
+                                    
+                                    weightsDiv.innerHTML = cellHtml;
+                                } else {
+                                    
+                                        weightsDiv.innerHTML = `
+                                            ${ACTIONS.UP}: ${weights[ACTIONS.UP].toFixed(2)}<br>
+                                            ${ACTIONS.LEFT}: ${weights[ACTIONS.LEFT].toFixed(2)}<br>
+                                            ${ACTIONS.RIGHT}: ${weights[ACTIONS.RIGHT].toFixed(2)}<br>
+                                            ${ACTIONS.DOWN}: ${weights[ACTIONS.DOWN].toFixed(2)}
+                                        `;
+                                }
+                            }
+                            
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 重置训练
+        function reset() {
+            trajectory = []
+            G = 0
+            transitionMap = {}
+            isSimpleDone = false
+            updateTrajectoryShow ()
+            updateFormula()
+
+            initGridWorld();
+        }
+        
+        // 初始化
+        initGridWorld();
+        
+        // 训练一步
+        function trainStep() {
+            return step(true)
+        }
+
+        // 训练n步
+        function trainStepN(n) {
+            for (let i = 0; i < n; i++) {
+                simpleEpoch();
+                updateEpoch();
+            }
+        }
+
+        
+
+        // 是否运行循环
+        document.getElementById('allowCircle').addEventListener('change', (e)=>{
+            allowCircle = e.target.checked
+        });
+        document.getElementById('trainStepN').addEventListener('click', () => {
+            trainStepN(trainN);
+        });
+        document.getElementById('simpleStep').addEventListener('click', () => {
+            simpleStep();
+        });
+        document.getElementById('simpleEpoch').addEventListener('click', () => {
+            simpleEpoch();
+        });
+       
+        document.getElementById('updateEpoch').addEventListener('click', () => {
+            updateEpoch();
+        });
+       
+        document.getElementById('resetButton').addEventListener('click', reset);
+        
+        // 监听行数和列数的变化
+        document.getElementById('rows').addEventListener('change', reset);
+        document.getElementById('cols').addEventListener('change', reset);
+        document.getElementById('trainN').addEventListener('change', (e)=>{
+            trainN = e.target.value
+        });
+        document.getElementById('alpha').value = alpha
+        document.getElementById('alpha').addEventListener('change', (e)=>{
+            alpha = e.target.value
+            optimizer = tf.train.adam(alpha);
+            updateFormula()
+        });
+        document.getElementById('gamma').value = gamma
+        document.getElementById('gamma').addEventListener('change', (e)=>{
+            gamma = e.target.value
+            updateFormula()
+        });
+        document.getElementById('epsilon').value = epsilon
+        document.getElementById('epsilon').addEventListener('change', (e)=>{
+            epsilon = e.target.value
+        });
+
+        // 获取可用动作并排序
+        function getAvailableActions(state) {
+            const [row, col] = state;
+            const actions = [];
+
+            if (allowCircle) {
+                actions.push(...ACTION_LIST)
+            } else {
+                for (a of ACTION_LIST) {
+                    let { nextState } = takeAction(state, a)
+                    if (nextState[0] === lastState[0] && nextState[1] === lastState[1]) {
+                        continue
+                    }
+                    actions.push(a)
+                }
+            }
+            
+            return actions;
+        }
+
+        function chooseAction(state) {
+            let availableActions = getAvailableActions(state)
+            if (Math.random() < epsilon) {
+                // 探索：随机选择一个动作
+                return availableActions[Math.floor(Math.random() * availableActions.length)];
+            } else {
+                // 选择权重最高的动作
+                const weights = getP(state);
+                let maxQ = -Infinity;
+                let bestActions = [];
+
+                for(let action of availableActions) {
+                    if (weights[action] > maxQ) {
+                        maxQ = weights[action];
+                        bestActions = [action];
+                    } else if (weights[action] === maxQ) {
+                        bestActions.push(action);
+                    }
+                }
+                
+                return bestActions[Math.floor(Math.random() * bestActions.length)];
+            }
+        }
+        
+        
+        // 执行动作，获取下一个状态和奖励
+        function takeAction(state, action) {
+            let [row, col] = state;
+            let reward = 0;
+            
+            switch (action) {
+                case ACTIONS.UP:
+                    row = Math.max(0, row - 1);
+                    break;
+                case ACTIONS.DOWN:
+                    row = Math.min(rowNum - 1, row + 1);
+                    break;
+                case ACTIONS.LEFT:
+                    col = Math.max(0, col - 1);
+                    break;
+                case ACTIONS.RIGHT:
+                    col = Math.min(colNum - 1, col + 1);
+                    break;
+            }
+            
+            let nextState = [row, col];
+            let isDone = false
+            let isEnd = false
+            
+            // 计算奖励
+            if (gridTable[row][col] === 'cliff') {
+                reward = -100; // 掉入悬崖
+                // nextState = [rowNum - 1, 0]; // 重置到起点
+                isDone = true
+            } else if (gridTable[row][col] === 'end') {
+                reward = 100; // 到达终点
+                // nextState = [rowNum - 1, 0]; // 重置到起点
+                isDone = true
+                isEnd = true
+            } else {
+                reward = -1; // 每步的惩罚
+            }
+            
+            return { nextState, reward, isDone, isEnd };
+        }
+
+        function updateTrajectoryShow () {
+            trajectoryShow = ''
+            for (let t of trajectory) {
+                let { state, actionIdx, reward } = t
+                trajectoryShow += `(${getStateKey(state, true)}, ${ACTION_LIST[actionIdx]}, ${reward}), `
+            }
+
+            document.getElementById('trajectoryShow').textContent = trajectoryShow;
+        }
+
+        function updateFormula() {
+            
+        }
+
+        function resetSimple() {
+            trajectory = []
+            G = 0
+            transitionMap = {}
+            isSimpleDone = false
+            lastState = currentState = [rowNum - 1, 0]
+        }
+        function checkResetSimple() {
+            if(trajectory.length == 0) {
+                resetSimple()
+            }
+        }
+        function simpleStep() {
+            if (!isSimpleDone) {
+                let currentAction = chooseAction(currentState);
+                let { nextState, reward, isDone, isEnd } = takeAction(currentState, currentAction);
+
+                let key = getStateKey(currentState)
+                // if (transitionMap[key] !== undefined) {
+                //     let lastIdx = transitionMap[key]
+                //     // let lastTr = trajectory[lastIdx]
+                //     // if (lastTr.reward > reward) {
+                //     //     trajectory.splice(lastIdx+1)
+                //     //     return
+                //     // } else {
+                //     //     trajectory.splice(lastIdx)
+                //     // }
+                //     trajectory.splice(lastIdx)
+                // } 
+                // transitionMap[key] = trajectory.length
+
+                trajectory.push({"state": currentState, "actionIdx": getActionIndex(currentAction), reward})
+                lastAction = currentAction
+                lastState = currentState
+                currentState = nextState
+                
+                updateUI();
+
+                isSimpleDone = isDone
+            }
+        }
+        function simpleEpoch() {
+            while (!isSimpleDone || trajectory.length == 0) {
+                simpleStep()
+            }
+        }
+
+        function softmax(logits) {
+            const max = Math.max(...logits);
+            const exps = logits.map(l => Math.exp(l - max));
+            const sum = exps.reduce((a, b) => a + b);
+            return exps.map(e => e / sum);
+        }
+
+
+        function softmax0(logits) {
+            const exps = logits.map(l => Math.exp(l));
+            const sum = exps.reduce((a, b) => a + b);
+            return exps.map(e => e / sum);
+        }
+
+        function updateEpoch() {
+            updateP(trajectory)
+            isSimpleDone = false
+
+            lastState = currentState = [rowNum - 1, 0]
+
+            updateUI();
+
+            checkResetSimple()
+        }
+
+        
+        
+    </script>
+</body>
+</html>
